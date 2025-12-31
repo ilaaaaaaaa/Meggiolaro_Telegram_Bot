@@ -1,0 +1,30 @@
+package org.example;
+
+import org.apache.commons.configuration2.builder.fluent.Configurations;
+import org.apache.commons.configuration2.ex.ConfigurationException;
+import org.apache.commons.configuration2.Configuration;
+
+public class ConfigurationSingleton {
+    private static ConfigurationSingleton instance;
+    private Configuration config;
+
+    private ConfigurationSingleton() {
+        Configurations configurations = new Configurations();
+        try {
+            config = configurations.properties("config.properties");
+        } catch (ConfigurationException e) {
+            System.err.println("File not found!");
+            System.exit(-1);
+        }
+    }
+
+    public static ConfigurationSingleton getInstance() {
+        if (instance == null)
+            instance = new ConfigurationSingleton();
+        return instance;
+    }
+
+    public String getProperty(String key) {
+        return config.getString(key);
+    }
+}
