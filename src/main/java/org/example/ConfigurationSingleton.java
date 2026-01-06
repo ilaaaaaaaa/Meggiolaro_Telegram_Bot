@@ -13,7 +13,7 @@ public class ConfigurationSingleton {
         try {
             config = configurations.properties("config.properties");
         } catch (ConfigurationException e) {
-            System.err.println("File not found!");
+            System.err.println("File non trovato!");
             System.exit(-1);
         }
     }
