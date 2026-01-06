@@ -17,7 +17,7 @@ public class APIRequests {
     private final Gson gson = new Gson();
     private static final String BASE_URL = "https://thronesapi.com/api/v2/Characters";
 
-    // Recupera tutti i personaggi
+    // Metodo che recupera tutti i personaggi
     public List<Character> getAllCharacters() {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL))
@@ -36,7 +36,7 @@ public class APIRequests {
         }
     }
 
-    // Recupera un personaggio per ID
+    // Metodo che recupera un personaggio per ID
     public Character getCharacterById(int id) {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(BASE_URL + "/" + id))
@@ -54,7 +54,7 @@ public class APIRequests {
         }
     }
 
-    // Cerca un personaggio per nome completo
+    // Metodo che erca un personaggio per nome completo
     public Character cercaCharacter(String nome) {
         if (nome == null || nome.isBlank()) return null;
 

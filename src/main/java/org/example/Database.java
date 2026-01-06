@@ -70,7 +70,7 @@ public class Database {
         );
     """;
 
-        // Esecuzione
+        // Esecuzione delle query
         try (Statement stmt = connection.createStatement()) {
             stmt.execute(createUsers);
             stmt.execute(createCharacters);
@@ -87,11 +87,7 @@ public class Database {
         return instance;
     }
 
-    /* ======================================================
-       ===================== USERS ==========================
-       ====================================================== */
-
-    // Restituisce l'id dell'utente, creandolo se non esiste
+    // Metodo che restituisce l'id dell'utente, creandolo se non esiste [tabella users]
     public int getOrCreateUser(long telegramId, String username, String firstName, String lastName) {
 
         String select = "SELECT id FROM users WHERE telegram_id = ?";
@@ -105,9 +101,9 @@ public class Database {
         } catch (SQLException ignored) {}
 
         String insert = """
-                INSERT INTO users (telegram_id, username, first_name, last_name)
-                VALUES (?, ?, ?, ?)
-                """;
+            INSERT INTO users (telegram_id, username, first_name, last_name)
+            VALUES (?, ?, ?, ?)
+            """;
 
         try (PreparedStatement stmt = connection.prepareStatement(insert, Statement.RETURN_GENERATED_KEYS)) {
             stmt.setLong(1, telegramId);
@@ -127,11 +123,7 @@ public class Database {
         return -1;
     }
 
-    /* ======================================================
-       ================== CHARACTERS ========================
-       ====================================================== */
-
-    // Restituisce l'id del personaggio, creandolo se non esiste
+    // Metodo che restituisce l'id del personaggio, creandolo se non esiste [tabella characters]
     public int getOrCreateCharacter(Character c) {
 
         String select = "SELECT id FROM characters WHERE api_id = ?";
@@ -169,10 +161,7 @@ public class Database {
         return -1;
     }
 
-    /* ======================================================
-       =================== IMAGES ===========================
-       ====================================================== */
-
+    // Metodo che salva l'url dell'immagine e l'id del personaggio nel database [tabella character_images]
     public void saveCharacterImage(int characterId, String imageUrl) {
 
         String query = """
@@ -189,10 +178,7 @@ public class Database {
         }
     }
 
-    /* ======================================================
-       ================== FAVORITES =========================
-       ====================================================== */
-
+    // Metodo che salva un personaggio tra i preferiti [tabella user_favorites]
     public boolean addFavorite(int userId, int characterId) {
 
         String query = """
@@ -204,13 +190,14 @@ public class Database {
             stmt.setInt(1, userId);
             stmt.setInt(2, characterId);
             int rows = stmt.executeUpdate();
-            return rows > 0; // ✅ solo se aggiunto
+            return rows > 0;
         } catch (SQLException e) {
             System.err.println("Errore aggiunta preferito: " + e.getMessage());
             return false;
         }
     }
 
+    // Metodo che rimuove un personaggio dai preferiti [tabella user_favorites]
     public boolean removeFavorite(int userId, int characterId) {
 
         String query = """
@@ -222,13 +209,14 @@ public class Database {
             stmt.setInt(1, userId);
             stmt.setInt(2, characterId);
             int rows = stmt.executeUpdate();
-            return rows > 0; // ✅ solo se ha davvero cancellato
+            return rows > 0;
         } catch (SQLException e) {
             System.err.println("Errore rimozione preferito: " + e.getMessage());
             return false;
         }
     }
 
+    // Metodo che ritorna la lista dei personaggi salvati nei preferiti [tabella user_favorites]
     public List<Character> getUserFavorites(int userId) {
 
         List<Character> favorites = new ArrayList<>();
@@ -252,8 +240,8 @@ public class Database {
                         rs.getString("full_name"),
                         rs.getString("title"),
                         rs.getString("family"),
-                        null,   // image
-                        null    // imageUrl ← IMPORTANTISSIMO
+                        null,
+                        null
                 );
                 favorites.add(c);
             }
@@ -264,10 +252,7 @@ public class Database {
         return favorites;
     }
 
-    /* ======================================================
-       ===================== LOGS ===========================
-       ====================================================== */
-
+    // Metodo che tiene traccia dei comandi utilizzati dall'utente [usage_logs]
     public void logCommand(int userId, String command, String parameter) {
 
         String query = """
@@ -283,5 +268,68 @@ public class Database {
         } catch (SQLException e) {
             System.err.println("Errore log comando: " + e.getMessage());
         }
+    }
+
+    // Metodo che ritorna l'url con l'immagine di un personaggio [tabella character_images]
+    public String getCharacterImage(int characterId) {
+        String query = """
+            SELECT image_url
+            FROM character_images
+            WHERE character_id = ?
+            LIMIT 1
+            """;
+
+        try (PreparedStatement stmt = connection.prepareStatement(query)) {
+            stmt.setInt(1, characterId);
+            ResultSet rs = stmt.executeQuery();
+
+            if (rs.next()) {
+                return rs.getString("image_url");
+            }
+        } catch (SQLException e) {
+            System.err.println("Errore lettura immagine: " + e.getMessage());
+        }
+
+        return null;
+    }
+
+    // Metodi per il comando /stats
+    // 1. Numero totale di comandi di un utente
+    public int getUserCommandCount(int userId) throws SQLException {
+        String query = "SELECT COUNT(*) AS total FROM usage_logs WHERE user_id = ?";
+        try (PreparedStatement stmt = connection.prepareStatement(query)) {
+            stmt.setInt(1, userId);
+            ResultSet rs = stmt.executeQuery();
+            if (rs.next()) return rs.getInt("total");
+        }
+        return 0;
+    }
+
+    // 2. Conteggio comandi totali per tipo
+    public String getCommandUsageStats() throws SQLException {
+        String query = "SELECT command, COUNT(*) AS total FROM usage_logs GROUP BY command ORDER BY total DESC";
+        StringBuilder sb = new StringBuilder();
+        try (PreparedStatement stmt = connection.prepareStatement(query);
+             ResultSet rs = stmt.executeQuery()) {
+            while (rs.next()) {
+                sb.append(rs.getString("command")).append(": ").append(rs.getInt("total")).append("\n");
+            }
+        }
+        return sb.toString();
+    }
+
+    // 3. Ultimi n comandi eseguiti da un utente
+    public List<String> getUserRecentCommands(int userId, int limit) throws SQLException {
+        List<String> list = new ArrayList<>();
+        String query = "SELECT command FROM usage_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?";
+        try (PreparedStatement stmt = connection.prepareStatement(query)) {
+            stmt.setInt(1, userId);
+            stmt.setInt(2, limit);
+            ResultSet rs = stmt.executeQuery();
+            while (rs.next()) {
+                list.add(rs.getString("command"));
+            }
+        }
+        return list;
     }
 }

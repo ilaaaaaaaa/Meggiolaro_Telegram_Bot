@@ -45,6 +45,9 @@ public class MaesterOfWesterosBot implements LongPollingSingleThreadUpdateConsum
                 case "/fav":
                     handleFavorite(update);
                     break;
+                case "/stats":
+                    handleStats(update); // nuovo metodo per le statistiche
+                    break;
                 default:
                     handleUnknown(update);
                     break;
@@ -72,7 +75,8 @@ public class MaesterOfWesterosBot implements LongPollingSingleThreadUpdateConsum
                 new BotCommand("/start", "Avvia il bot"),
                 new BotCommand("/help", "Mostra il menù"),
                 new BotCommand("/character", "Cerca un personaggio"),
-                new BotCommand("/fav", "Gestisci i preferiti")
+                new BotCommand("/fav", "Gestisci i preferiti"),
+                new BotCommand("/stats", "Mostra statistiche")
         );
 
         SetMyCommands setCommands = new SetMyCommands(commands);
@@ -120,19 +124,21 @@ public class MaesterOfWesterosBot implements LongPollingSingleThreadUpdateConsum
     private void handleStart(Update update) {
         long chatId = update.getMessage().getChatId();
         String firstName = update.getMessage().getChat().getFirstName();
+
         String message = """
-            🐉 Benvenuto, viandante!
+        🐉 Benvenuto, viandante %s!
 
-            Sono il *Maester di Westeros* 📜
-            Posso raccontarti storie e informazioni sui personaggi di *Game of Thrones*.
+        Sono il *Maester di Westeros* 📜
+        Posso aiutarti a esplorare il mondo di *Game of Thrones*.
 
-            📌 Cosa posso fare:
-            • Cercare un personaggio
-            • Mostrarti i membri di una casata
-            • Suggerirti un personaggio casuale
+        📌 Cosa posso fare:
+        • Cercare un personaggio (/character)
+        • Gestire i tuoi preferiti (/fav)
+        • Mostrare statistiche dei comandi (/stats)
 
-            Digita /help per vedere tutti i comandi disponibili.
-            """;
+        Digita /help per vedere tutti i comandi disponibili.
+        """.formatted(firstName);
+
         sendMessage(chatId, message);
 
         // Log comando
@@ -161,11 +167,13 @@ public class MaesterOfWesterosBot implements LongPollingSingleThreadUpdateConsum
         /fav add <nome> – Aggiungi un personaggio ai preferiti
         /fav list – Mostra i tuoi preferiti
         /fav remove <nome> – Rimuovi un preferito
+        /stats <user|command|recent> – Mostra statistiche comandi
 
         🧭 *Esempi*
         • /character Jon Snow
         • /fav add Arya Stark
         • /fav list
+        • /stats user
         """;
 
         sendMessage(chatId, message);
@@ -187,7 +195,6 @@ public class MaesterOfWesterosBot implements LongPollingSingleThreadUpdateConsum
     private void handleCharacter(Update update) {
         long chatId = update.getMessage().getChatId();
         String text = update.getMessage().getText();
-
         String nome = getCommandArgument(text);
 
         if (nome == null || nome.isBlank()) {
@@ -202,38 +209,57 @@ public class MaesterOfWesterosBot implements LongPollingSingleThreadUpdateConsum
             return;
         }
 
-        String message = """
-            👤 *%s*
-            
-            🏷 *Soprannome:* %s
-            🏰 *Casata:* %s
-            """.formatted(
-                character.getFullName(),
-                safe(character.getTitle()),
-                safe(character.getFamily())
-        );
-
-        sendMessage(chatId, message);
-
-        // invio immagine se presente
-        if (character.getImageUrl() != null && !character.getImageUrl().isBlank()) {
-            sendPhoto(chatId, character.getImageUrl());
-        }
-
-        // Log comando
         try {
             Database db = Database.getInstance();
-            int userId = db.getOrCreateUser(chatId,
+
+            // Recupera o crea utente
+            int userId = db.getOrCreateUser(
+                    chatId,
                     update.getMessage().getChat().getUserName(),
                     update.getMessage().getChat().getFirstName(),
-                    update.getMessage().getChat().getLastName());
+                    update.getMessage().getChat().getLastName()
+            );
+
+            // Recupera o crea personaggio
+            int characterId = db.getOrCreateCharacter(character);
+
+            // Recupera immagine dal DB
+            String imageUrl = db.getCharacterImage(characterId);
+
+            // Se non esiste, salva quella dell'API
+            if (imageUrl == null && character.getImageUrl() != null && !character.getImageUrl().isBlank()) {
+                imageUrl = character.getImageUrl();
+                db.saveCharacterImage(characterId, imageUrl);
+            }
+
+            // Messaggio testuale
+            String message = """
+                👤 *%s*
+                
+                🏷 *Soprannome:* %s
+                🏰 *Casata:* %s
+                """.formatted(
+                    character.getFullName(),
+                    safe(character.getTitle()),
+                    safe(character.getFamily())
+            );
+
+            sendMessage(chatId, message);
+
+            // Invio immagine (se presente)
+            if (imageUrl != null && !imageUrl.isBlank()) {
+                sendPhoto(chatId, imageUrl);
+            }
+
+            // log comando
             db.logCommand(userId, "/character", nome);
+
         } catch (Exception e) {
             e.printStackTrace();
+            sendMessage(chatId, "❌ Errore durante il recupero del personaggio.");
         }
     }
 
-    // Funzione per il comando /fav
     // Funzione per il comando /fav
     private void handleFavorite(Update update) {
 
@@ -277,15 +303,27 @@ public class MaesterOfWesterosBot implements LongPollingSingleThreadUpdateConsum
                     return;
                 }
 
+                // Crea o recupera personaggio
                 int characterId = db.getOrCreateCharacter(character);
-                boolean added = db.addFavorite(userId, characterId);
 
-                if (added) {
-                    sendMessage(chatId, "✅ \"" + character.getFullName() + "\" aggiunto ai tuoi preferiti.");
-                } else {
-                    sendMessage(chatId, "ℹ️ \"" + character.getFullName() + "\" è già tra i tuoi preferiti.");
+                // Salva immagine SOLO se non già presente
+                String imageUrl = character.getImageUrl();
+                if (imageUrl != null && !imageUrl.isBlank()) {
+                    String existingImage = db.getCharacterImage(characterId);
+                    if (existingImage == null) {
+                        db.saveCharacterImage(characterId, imageUrl);
+                    }
                 }
 
+                // Aggiunta ai preferiti
+                boolean added = db.addFavorite(userId, characterId);
+
+                sendMessage(chatId, added
+                        ? "✅ \"" + character.getFullName() + "\" aggiunto ai tuoi preferiti."
+                        : "ℹ️ \"" + character.getFullName() + "\" è già tra i tuoi preferiti."
+                );
+
+                // log comando
                 db.logCommand(userId, "/fav add", param);
                 return;
             }
@@ -351,4 +389,65 @@ public class MaesterOfWesterosBot implements LongPollingSingleThreadUpdateConsum
             e.printStackTrace();
         }
     }
+
+    // Funzione per il comando /stats
+    private void handleStats(Update update) {
+        long chatId = update.getMessage().getChatId();
+        String text = update.getMessage().getText();
+        String argument = getCommandArgument(text);
+
+        if (argument == null || argument.isBlank()) {
+            sendMessage(chatId, "❌ Devi specificare un tipo di statistica: user, command o recent.\nEsempio:\n/stats user");
+            return;
+        }
+
+        String subCommand = argument.toLowerCase().trim();
+
+        try {
+            Database db = Database.getInstance();
+            long telegramId = chatId;
+            String username = update.getMessage().getChat().getUserName();
+            String firstName = update.getMessage().getChat().getFirstName();
+            String lastName = update.getMessage().getChat().getLastName();
+
+            // Recupera o crea l'utente
+            int userId = db.getOrCreateUser(telegramId, username, firstName, lastName);
+
+            switch (subCommand) {
+                case "user":
+                    int totalCommands = db.getUserCommandCount(userId);
+                    sendMessage(chatId, "📊 Hai eseguito *" + totalCommands + "* comandi totali.");
+                    break;
+
+                case "command":
+                    String commandStats = db.getCommandUsageStats(); // restituisce testo già formattato
+                    sendMessage(chatId, "📈 Statistiche comandi:\n" + commandStats);
+                    break;
+
+                case "recent":
+                    List<String> recentCommands = db.getUserRecentCommands(userId, 5); // ultimi 5 comandi
+                    if (recentCommands.isEmpty()) {
+                        sendMessage(chatId, "ℹ️ Nessun comando recente trovato.");
+                    } else {
+                        StringBuilder sb = new StringBuilder("🕒 Ultimi comandi:\n");
+                        for (String cmd : recentCommands) {
+                            sb.append("• ").append(cmd).append("\n");
+                        }
+                        sendMessage(chatId, sb.toString());
+                    }
+                    break;
+
+                default:
+                    sendMessage(chatId, "❌ Tipo di statistica non riconosciuto. Usa: user, command o recent.");
+            }
+
+            // log del comando
+            db.logCommand(userId, "/stats " + subCommand, null);
+
+        } catch (Exception e) {
+            sendMessage(chatId, "❌ Errore durante l'elaborazione delle statistiche.");
+            e.printStackTrace();
+        }
+    }
+
 }

@@ -24,7 +24,6 @@ public class Character {
     }
 
     // Metodi GETTER e SETTER
-
     // ID
     public int getId() { return id; }
     public void setId(int id) { this.id = id; }
