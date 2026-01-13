@@ -15,7 +15,8 @@ import java.util.List;
 
 public class MaesterOfWesterosBot implements LongPollingSingleThreadUpdateConsumer {
     private final TelegramClient telegramClient;
-    private final APIRequests api = new APIRequests();
+    private final ImagesAndCharactersAPI api = new ImagesAndCharactersAPI();
+    private final QuotesAndHousesAPI quotesApi = new QuotesAndHousesAPI();
 
     public MaesterOfWesterosBot(String botToken) {
         telegramClient = new OkHttpTelegramClient(botToken);
@@ -42,17 +43,47 @@ public class MaesterOfWesterosBot implements LongPollingSingleThreadUpdateConsum
                 case "/character":
                     handleCharacter(update);
                     break;
+                case "/characters":
+                    handleCharacters(update);
+                    break;
+                case "/houses":
+                    handleHouses(update);
+                    break;
                 case "/fav":
                     handleFavorite(update);
                     break;
                 case "/stats":
-                    handleStats(update); // nuovo metodo per le statistiche
+                    handleStats(update);
                     break;
                 default:
                     handleUnknown(update);
                     break;
             }
         }
+    }
+
+    // ---------------- Funzioni di appoggio ----------------
+    // Escape dei caratteri speciali per Telegram Markdown (ho avuto problemi con la sanificazione nel comando /houses)
+    private String escapeMarkdown(String text) {
+        if (text == null) return "";
+
+        return text.replace("_", "\\_")
+                .replace("[", "\\[")
+                .replace("]", "\\]")
+                .replace("(", "\\(")
+                .replace(")", "\\)")
+                .replace("~", "\\~")
+                .replace("`", "\\`")
+                .replace(">", "\\>")
+                .replace("#", "\\#")
+                .replace("+", "\\+")
+                .replace("-", "\\-")
+                .replace("=", "\\=")
+                .replace("|", "\\|")
+                .replace("{", "\\{")
+                .replace("}", "\\}")
+                .replace(".", "\\.")
+                .replace("!", "\\!");
     }
 
     // Funzione per mandare un messaggio
@@ -75,6 +106,8 @@ public class MaesterOfWesterosBot implements LongPollingSingleThreadUpdateConsum
                 new BotCommand("/start", "Avvia il bot"),
                 new BotCommand("/help", "Mostra il menù"),
                 new BotCommand("/character", "Cerca un personaggio"),
+                new BotCommand("/characters", "Mostra la lista dei personaggi"),
+                new BotCommand("/houses", "Mostra le casate di Westeros"),
                 new BotCommand("/fav", "Gestisci i preferiti"),
                 new BotCommand("/stats", "Mostra statistiche")
         );
@@ -105,6 +138,57 @@ public class MaesterOfWesterosBot implements LongPollingSingleThreadUpdateConsum
         return (value == null || value.isBlank()) ? "Sconosciuto" : value;
     }
 
+    // Funzione per costruire la citazione
+    private String buildRandomQuoteMessage() {
+        try {
+            Quote quote = quotesApi.getRandomQuote();
+
+            // controllo base
+            if (quote == null) {
+                return null;
+            }
+
+            if (quote.getSentence() == null || quote.getSentence().isBlank()) {
+                return null;
+            }
+
+            String sentence = quote.getSentence();
+
+            // autore
+            String author = "Sconosciuto";
+            if (quote.getCharacter() != null) {
+                if (quote.getCharacter().getName() != null &&
+                        !quote.getCharacter().getName().isBlank()) {
+                    author = quote.getCharacter().getName();
+                }
+            }
+
+            // casata (opzionale)
+            String house = null;
+            if (quote.getCharacter() != null) {
+                if (quote.getCharacter().getHouse() != null) {
+                    if (quote.getCharacter().getHouse().getName() != null &&
+                            !quote.getCharacter().getHouse().getName().isBlank()) {
+                        house = quote.getCharacter().getHouse().getName();
+                    }
+                }
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("💬 _“").append(sentence).append("”_\n");
+            sb.append("— *").append(author).append("*");
+
+            if (house != null) {
+                sb.append("\n🏰 ").append(house);
+            }
+
+            return sb.toString();
+
+        } catch (Exception e) {
+            return null; // fallback silenzioso
+        }
+    }
+
     // Funzione per mandare la foto ricavata dall'API
     private void sendPhoto(long chatId, String imageUrl) {
         SendPhoto photo = SendPhoto
@@ -120,24 +204,33 @@ public class MaesterOfWesterosBot implements LongPollingSingleThreadUpdateConsum
         }
     }
 
+
+    // ---------------- Funzioni per i COMANDI ----------------
     // Funzione per il comando /start
     private void handleStart(Update update) {
         long chatId = update.getMessage().getChatId();
         String firstName = update.getMessage().getChat().getFirstName();
 
+        String quoteMessage = buildRandomQuoteMessage();
+
         String message = """
-        🐉 Benvenuto, viandante %s!
+            🐉 Benvenuto, viandante %s!
+            
+            Sono il *Maester di Westeros* 📜
+            Posso aiutarti a esplorare il mondo di *Game of Thrones*.
+            
+            📌 Cosa posso fare:
+            • Cercare un personaggio o più personaggi (/character)
+            • Cercare una casata o più casate (/house)
+            • Gestire i tuoi preferiti (/fav)
+            • Mostrare statistiche dei comandi (/stats)
+            """.formatted(firstName);
 
-        Sono il *Maester di Westeros* 📜
-        Posso aiutarti a esplorare il mondo di *Game of Thrones*.
+        if (quoteMessage != null) {
+            message += "\n✨ *Citazione del giorno*\n" + quoteMessage;
+        }
 
-        📌 Cosa posso fare:
-        • Cercare un personaggio (/character)
-        • Gestire i tuoi preferiti (/fav)
-        • Mostrare statistiche dei comandi (/stats)
-
-        Digita /help per vedere tutti i comandi disponibili.
-        """.formatted(firstName);
+        message += "\n\nDigita /help per vedere tutti i comandi disponibili.";
 
         sendMessage(chatId, message);
 
@@ -159,22 +252,29 @@ public class MaesterOfWesterosBot implements LongPollingSingleThreadUpdateConsum
         long chatId = update.getMessage().getChatId();
 
         String message = """
-        📜 *Comandi disponibili*
+    📜 *Comandi disponibili*
 
-        /start – Avvia il bot
-        /help – Mostra questo menù
-        /character <nome> – Cerca un personaggio
-        /fav add <nome> – Aggiungi un personaggio ai preferiti
-        /fav list – Mostra i tuoi preferiti
-        /fav remove <nome> – Rimuovi un preferito
-        /stats <user|command|recent> – Mostra statistiche comandi
+    /start – Avvia il bot e ricevi una citazione casuale
+    /help – Mostra questo menù
+    /character <nome> – Cerca un personaggio
+    /fav add <nome> – Aggiungi un personaggio ai preferiti
+    /fav list – Mostra i tuoi preferiti
+    /fav remove <nome> – Rimuovi un preferito
+    /stats <user|command|recent> – Mostra statistiche comandi
+    /houses – Mostra la lista di tutte le casate
+    /houses <slug> – Mostra membri e dettagli di una casata
 
-        🧭 *Esempi*
-        • /character Jon Snow
-        • /fav add Arya Stark
-        • /fav list
-        • /stats user
-        """;
+    🧭 *Esempi:*
+    • /characters
+    • /character Jon Snow
+    • /fav add Arya Stark
+    • /fav list
+    • /stats user
+    • /stats command
+    • /stats recent
+    • /houses
+    • /houses stark
+    """;
 
         sendMessage(chatId, message);
 
@@ -257,6 +357,106 @@ public class MaesterOfWesterosBot implements LongPollingSingleThreadUpdateConsum
         } catch (Exception e) {
             e.printStackTrace();
             sendMessage(chatId, "❌ Errore durante il recupero del personaggio.");
+        }
+    }
+
+    // Funzione per il comando /characters
+    private void handleCharacters(Update update) {
+        long chatId = update.getMessage().getChatId();
+        String text = update.getMessage().getText();
+        String filter = getCommandArgument(text);
+
+        List<Character> allCharacters = api.getAllCharacters();
+
+        if (allCharacters.isEmpty()) {
+            sendMessage(chatId, "❌ Nessun personaggio disponibile.");
+            return;
+        }
+
+        StringBuilder message = new StringBuilder("👥 *Personaggi disponibili*\n\n");
+
+        for (Character c : allCharacters) {
+
+            // filtro per lettera (opzionale)
+            if (filter != null && !filter.isBlank()) {
+                if (!c.getFullName().toLowerCase().startsWith(filter.toLowerCase())) {
+                    continue;
+                }
+            }
+
+            message.append("• ")
+                    .append(c.getFullName())
+                    .append("\n");
+        }
+
+        message.append("\n🔍 Usa `/character <nome>` per i dettagli");
+
+        sendMessage(chatId, message.toString());
+
+        // log
+        try {
+            Database db = Database.getInstance();
+            int userId = db.getOrCreateUser(
+                    chatId,
+                    update.getMessage().getChat().getUserName(),
+                    update.getMessage().getChat().getFirstName(),
+                    update.getMessage().getChat().getLastName()
+            );
+            db.logCommand(userId, "/characters", filter);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Funzione per il comando /houses
+    private void handleHouses(Update update) {
+        long chatId = update.getMessage().getChatId();
+        String text = update.getMessage().getText();
+        String argument = getCommandArgument(text); // nome o slug (soprannome) della casata
+
+        try {
+            if (argument == null || argument.isBlank()) {
+                // Lista di tutte le casate
+                List<House> houses = quotesApi.getAllHouses();
+
+                if (houses.isEmpty()) {
+                    sendMessage(chatId, "ℹ️ Nessuna casata trovata.");
+                    return;
+                }
+
+                StringBuilder sb = new StringBuilder("🏰 *Lista di tutte le casate:*\n\n");
+                for (House house : houses) {
+                    sb.append("• ").append(escapeMarkdown(house.getName())).append("\n");
+                }
+
+                sendMessage(chatId, escapeMarkdown(sb.toString()));
+                return;
+            }
+
+            // Informazioni su una casata specifica
+            House house = quotesApi.getHouseBySlug(argument.toLowerCase());
+
+            if (house == null) {
+                sendMessage(chatId, "❌ Casata \"" + escapeMarkdown(argument) + "\" non trovata.");
+                return;
+            }
+
+            StringBuilder sb = new StringBuilder("🏰 *" + escapeMarkdown(house.getName()) + "*\n\n");
+            sb.append("👥 Membri:\n");
+
+            if (house.getMembers() == null || house.getMembers().isEmpty()) {
+                sb.append("Nessun membro trovato.");
+            } else {
+                for (HouseMember member : house.getMembers()) {
+                    sb.append("• ").append(escapeMarkdown(member.getName())).append("\n");
+                }
+            }
+
+            sendMessage(chatId, escapeMarkdown(sb.toString()));
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            sendMessage(chatId, "❌ Errore durante il recupero delle casate.");
         }
     }
 

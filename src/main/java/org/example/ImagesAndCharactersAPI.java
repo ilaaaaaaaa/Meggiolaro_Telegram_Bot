@@ -11,7 +11,7 @@ import java.util.List;
 
 import com.google.gson.Gson;
 
-public class APIRequests {
+public class ImagesAndCharactersAPI {
 
     private final HttpClient client = HttpClient.newHttpClient();
     private final Gson gson = new Gson();
@@ -54,7 +54,7 @@ public class APIRequests {
         }
     }
 
-    // Metodo che erca un personaggio per nome completo
+    // Metodo che cerca un personaggio per nome completo
     public Character cercaCharacter(String nome) {
         if (nome == null || nome.isBlank()) return null;
 

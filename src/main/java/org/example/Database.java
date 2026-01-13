@@ -307,16 +307,41 @@ public class Database {
 
     // 2. Conteggio comandi totali per tipo
     public String getCommandUsageStats() throws SQLException {
-        String query = "SELECT command, COUNT(*) AS total FROM usage_logs GROUP BY command ORDER BY total DESC";
         StringBuilder sb = new StringBuilder();
-        try (PreparedStatement stmt = connection.prepareStatement(query);
-             ResultSet rs = stmt.executeQuery()) {
+
+        // Lista comandi principali validi
+        List<String> validCommands = List.of(
+                "/start", "/help", "/character","/characters",
+                "/fav add", "/fav list", "/fav remove",
+                "/stats user", "/stats command", "/stats recent",
+                "/houses" // esclude /houses <slug>, lo puoi gestire a parte se vuoi
+        );
+
+        // Recupera tutti i comandi registrati
+        String sql = "SELECT command, parameter, COUNT(*) AS count FROM usage_logs GROUP BY command, parameter ORDER BY count DESC";
+        try (Statement stmt = connection.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
             while (rs.next()) {
-                sb.append(rs.getString("command")).append(": ").append(rs.getInt("total")).append("\n");
+                String cmd = rs.getString("command");
+                String param = rs.getString("parameter");
+
+                String fullCommand = cmd;
+                if (param != null && !param.isBlank()) {
+                    fullCommand += " " + param;
+                }
+
+                // Considera solo i comandi validi
+                if (validCommands.contains(fullCommand) || validCommands.contains(cmd)) {
+                    sb.append(fullCommand)
+                            .append(": ")
+                            .append(rs.getInt("count"))
+                            .append("\n");
+                }
             }
         }
+
         return sb.toString();
     }
+
 
     // 3. Ultimi n comandi eseguiti da un utente
     public List<String> getUserRecentCommands(int userId, int limit) throws SQLException {
